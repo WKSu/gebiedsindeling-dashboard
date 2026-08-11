@@ -1,0 +1,11 @@
+# Blokken is 27 MB en wordt door dit hulpmiddel niet gebruikt
+data/TIR/Blokken/
+
+# ESRI-restanden
+*.sr.lock
+*.sbn
+*.sbx
+*.qix
+
+node_modules/
+__pycache__/

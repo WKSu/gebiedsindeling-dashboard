@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "type": "module",
+  "description": "Regressietest voor app.js. Draaien met: npm install && node test_app.mjs",
+  "scripts": { "test": "node test_app.mjs" },
+  "devDependencies": { "jsdom": "^26.0.0" }
+}
