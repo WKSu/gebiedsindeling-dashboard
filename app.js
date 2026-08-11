@@ -100,6 +100,15 @@
     level: "sbd",
     threshold: CFG.DEFAULT_THRESHOLD,
     showBelow: false,
+    // Handmatige correcties op wat de drempel voorstelt, per niveau bijgehouden:
+    // 'on' = alsnog meetellen, 'off' = juist niet meetellen. De drempel blijft dus
+    // het voorstel, dit is jouw laatste woord erover.
+    manual: {
+      sbd: { on: new Set(), off: new Set() },
+      sb: { on: new Set(), off: new Set() },
+      bu: { on: new Set(), off: new Set() },
+    },
+    clickMode: "select",       // 'select' = sector kiezen, 'refine' = gebied aan/uit
     sort: { key: "pct", dir: "desc" },
     hover: null,
     stack: null,
@@ -138,10 +147,10 @@
   }
 
   var PAINTERS = [
-    { fn: paintMode, deps: ["mode", "layer", "loading", "loaded"] },
+    { fn: paintMode, deps: ["mode", "layer", "loading", "loaded", "selection", "clickMode"] },
     { fn: paintSuggestions, deps: ["suggestions", "active", "searchOpen", "query", "selection"] },
     { fn: paintChips, deps: ["selection", "layer", "mode", "reverse"] },
-    { fn: paintControls, deps: ["level", "threshold", "showBelow", "basemap", "showAllParking", "showLabels", "mode"] },
+    { fn: paintControls, deps: ["level", "threshold", "showBelow", "basemap", "showAllParking", "showLabels", "mode", "clickMode"] },
     { fn: paintTotals, deps: ["@rows", "mode", "loading"] },
     { fn: paintNotice, deps: ["@rows", "selection", "mode", "error"] },
     { fn: paintTable, deps: ["@rows", "sort", "mode", "level"] },
@@ -444,6 +453,15 @@
     return "gedeeltelijk";
   }
 
+  /** Dekkingsklasse los van de drempel — voor de export, waar "onderdrempel"
+   *  onzin is bij een gebied dat je juist handmatig hebt aangezet. */
+  function band(pct) {
+    if (pct >= CFG.FULL_PCT) return "volledig";
+    if (pct >= CFG.MOSTLY_PCT) return "grotendeels";
+    if (pct >= 10) return "gedeeltelijk";
+    return "marginaal";
+  }
+
   function aggregate(cov, level, thr) {
     var groups = GROUP[level], totals = TOTAL[level];
     var acc = new Map();
@@ -470,6 +488,7 @@
         total: total,
         pct: pct,
         cls: classify(pct, thr),
+        band: band(pct),
         nSbd: sbdCount.get(code),
       });
     });
@@ -513,6 +532,45 @@
     return rows;
   }
 
+  /* ── handmatig aan/uit ─────────────────────────────────────────────────── */
+
+  /** Zet een gebied aan of uit. Komt de keuze overeen met wat de drempel al
+   *  voorstelt, dan verdwijnt de override in plaats van dat hij blijft hangen. */
+  function setCounted(code, wantOn, auto) {
+    var m = state.manual[state.level];
+    if (wantOn === auto) { m.on.delete(code); m.off.delete(code); }
+    else if (wantOn) { m.on.add(code); m.off.delete(code); }
+    else { m.off.add(code); m.on.delete(code); }
+    touch("manual");
+  }
+
+  function toggleCounted(code) {
+    var view = derive();
+    for (var i = 0; i < view.all.length; i++) {
+      var r = view.all[i];
+      if (r.code === code) { setCounted(code, !r.counted, r.auto); return true; }
+    }
+    return false;
+  }
+
+  function setAllCounted(wantOn) {
+    var view = derive();
+    var m = state.manual[state.level];
+    view.all.forEach(function (r) {
+      if (wantOn === r.auto) { m.on.delete(r.code); m.off.delete(r.code); }
+      else if (wantOn) { m.on.add(r.code); m.off.delete(r.code); }
+      else { m.off.add(r.code); m.on.delete(r.code); }
+    });
+    touch("manual");
+  }
+
+  function resetManual() {
+    var m = state.manual[state.level];
+    m.on.clear();
+    m.off.clear();
+    touch("manual");
+  }
+
   function sortRows(rows, sort) {
     var k = sort.key, sign = sort.dir === "asc" ? 1 : -1;
     var cmp;
@@ -539,8 +597,10 @@
       _cov = state.mode === "forward" ? computeCoverage(sel) : null;
     }
 
+    var man = state.mode === "forward" ? state.manual[state.level] : { on: new Set(), off: new Set() };
     var rowsKey = covKey + "|" + state.level + "|" + state.threshold + "|" +
-      state.showBelow + "|" + state.sort.key + state.sort.dir;
+      state.showBelow + "|" + state.sort.key + state.sort.dir + "|" +
+      Array.from(man.on).sort().join(",") + "|" + Array.from(man.off).sort().join(",");
 
     if (rowsKey !== _rowsKey) {
       _rowsKey = rowsKey;
@@ -549,22 +609,37 @@
       } else {
         _all = state.reverse.id ? reverseRows(state.reverse.level, state.reverse.id, state.threshold) : [];
       }
-      var keep = _all.filter(function (r) { return r.cls !== "onderdrempel"; });
-      _rows = sortRows(state.showBelow ? _all : keep, state.sort);
+      _all.forEach(function (r) {
+        r.auto = r.cls !== "onderdrempel";
+        r.counted = man.on.has(r.code) ? true : man.off.has(r.code) ? false : r.auto;
+        r.overridden = r.counted !== r.auto;
+      });
+      // Een handmatig uitgezet gebied blijft in de lijst staan, anders kun je het
+      // niet meer terugzetten.
+      _rows = sortRows(
+        _all.filter(function (r) { return r.counted || r.overridden || state.showBelow; }),
+        state.sort
+      );
     }
 
-    var above = _all.filter(function (r) { return r.cls !== "onderdrempel"; });
+    // Elke meegetelde rij zit ook in _rows, dus dit levert dezelfde verzameling
+    // in dezelfde volgorde als de tabel — waar de export op moet aansluiten.
+    var counted = _rows.filter(function (r) { return r.counted; });
     var totals = {
-      n: above.length,
-      nBelow: _all.length - above.length,
-      nFull: above.filter(function (r) { return r.cls === "volledig"; }).length,
-      nPartial: above.filter(function (r) { return r.cls !== "volledig"; }).length,
-      area: above.reduce(function (s, r) { return s + r.covered; }, 0),
-      nSbd: above.reduce(function (s, r) { return s + (r.nSbd || 0); }, 0),
+      n: counted.length,
+      nAuto: _all.filter(function (r) { return r.auto; }).length,
+      nBelow: _all.filter(function (r) { return !r.counted && !r.overridden; }).length,
+      nAdded: _all.filter(function (r) { return r.counted && r.overridden; }).length,
+      nRemoved: _all.filter(function (r) { return !r.counted && r.overridden; }).length,
+      nFull: counted.filter(function (r) { return r.cls === "volledig"; }).length,
+      nPartial: counted.filter(function (r) { return r.cls !== "volledig"; }).length,
+      area: counted.reduce(function (s, r) { return s + r.covered; }, 0),
+      nSbd: counted.reduce(function (s, r) { return s + (r.nSbd || 0); }, 0),
     };
 
     return {
-      rows: _rows, all: _all, above: above, rowsKey: _rowsKey, totals: totals, cov: _cov,
+      rows: _rows, all: _all, above: counted, counted: counted, rowsKey: _rowsKey,
+      totals: totals, cov: _cov,
       simplified: state.mode === "forward" && _rows.length > CFG.MAX_SVG_FEATURES,
     };
   }
@@ -666,10 +741,29 @@
   }
 
   function activeIndex() {
-    return state.mode === "forward" ? PIDX[state.layer] : TIDX[state.reverse.level];
+    if (state.mode === "reverse") return TIDX[state.reverse.level];
+    if (refining()) return TIDX[state.level];
+    return PIDX[state.layer];
+  }
+
+  /** Bijschaafstand: kaartkliks zetten gebieden aan/uit in plaats van sectoren te kiezen. */
+  function refining() {
+    return state.mode === "forward" &&
+      state.clickMode === "refine" &&
+      state.selection[state.layer].size > 0 &&
+      state.loaded.has(state.level);
   }
 
   function onMapClick(e) {
+    if (refining()) {
+      var view = derive();
+      var byCode = new Set(view.all.map(function (r) { return r.code; }));
+      var cand = hitTest(e.latlng, TIDX[state.level]).filter(function (h) { return byCode.has(h.id); });
+      if (!cand.length) { toast("Dit gebied ligt buiten de selectie"); return; }
+      toggleCounted(cand[0].id);
+      setState({ stack: null });
+      return;
+    }
     var hits = hitTest(e.latlng, activeIndex());
     var chosen = pick(hits);
     if (!chosen) { if (state.stack) setState({ stack: null }); return; }
@@ -694,7 +788,10 @@
 
   function onMapContext(e) {
     e.originalEvent.preventDefault();
-    var hits = hitTest(e.latlng, activeIndex());
+    // Rechtermuisklik gaat altijd over "wat ligt hier nog" in de parkeerlaag,
+    // ook in bijschaafstand — anders zou de popup TIR-codes als sector aanbieden.
+    var idx = state.mode === "forward" ? PIDX[state.layer] : TIDX[state.reverse.level];
+    var hits = hitTest(e.latlng, idx);
     setState({ stack: hits.length ? { latlng: e.latlng, hits: hits } : null });
   }
 
@@ -707,7 +804,8 @@
       var view = derive();
       var idx = state.mode === "forward" ? (state.loaded.has(state.level) ? TIDX[state.level] : null) : PIDX.sectoren;
       if (!idx) { if (state.hover) setState({ hover: null }); return; }
-      var allowed = new Set(view.rows.map(function (r) { return state.mode === "forward" ? r.code : r.code; }));
+      var pool = refining() ? view.all : view.rows;
+      var allowed = new Set(pool.map(function (r) { return r.code; }));
       var hits = hitTest(e.latlng, idx).filter(function (h) { return allowed.has(h.id); });
       var id = hits.length ? hits[0].id : null;
       if ((state.hover && state.hover.id) !== id) setState({ hover: id ? { id: id, from: "map" } : null });
@@ -856,7 +954,12 @@
         className: simplified ? "" : "cov-" + row.cls,
       };
     }
-    if (row.cls === "onderdrempel") {
+    // handmatig uitgezet: rood gestreept en leeg, zodat je in één oogopslag ziet
+    // dat je er zelf iets weggehaald hebt
+    if (!row.counted && row.overridden) {
+      return { pane: "gd-result", color: "#B4232A", weight: 1.8, opacity: 0.9, dashArray: "5 4", fill: false };
+    }
+    if (!row.counted) {
       return { pane: "gd-result", color: "#8A9099", weight: 1, opacity: 0.85, dashArray: "2 4", fill: false };
     }
     // Binnengrenzen tussen de gevonden vlakken blijven dun en halftransparant: de
@@ -866,6 +969,13 @@
       fill: true, fillColor: "#1B7F5F",
       dashArray: row.cls === "gedeeltelijk" ? "4 3" : null,
     };
+    // handmatig aangezet: stippellijn in het selectieblauw als herkenningspunt
+    if (row.overridden) {
+      base.color = "#0F62FE";
+      base.weight = 1.8;
+      base.opacity = 0.95;
+      base.dashArray = "1 3";
+    }
     if (simplified) {
       base.fillOpacity = row.cls === "volledig" ? 0.6 : row.cls === "grotendeels" ? 0.32 : 0.15;
       base.className = "";
@@ -1065,14 +1175,18 @@
     } else {
       var lv = LEVELS[state.level];
       header = ["Code", "Niveau", "Subbuurtcode", "Buurtcode", "Buurt", "Gebiedscode", "Gebied",
-        "Oppervlakte_totaal_m2", "Oppervlakte_binnen_selectie_m2", "Percentage", "Dekking", "Selectie"];
+        "Oppervlakte_totaal_m2", "Oppervlakte_binnen_selectie_m2", "Percentage", "Dekkingsklasse",
+        "Herkomst", "Selectie"];
       codeCols = new Set([0, 2, 3, 5]);
-      view.rows.forEach(function (r) {
+      // Alleen wat daadwerkelijk meegeteld wordt: de aangevinkte gebieden.
+      view.counted.forEach(function (r) {
         rows.push([
           r.code, lv.label,
           state.level === "sbd" ? r.code.slice(0, 5) : (state.level === "sb" ? r.code : ""),
           r.buurtCode, r.naam, r.gebiedCode, r.gebiedNaam,
-          rawNum(r.total, 1), rawNum(r.covered, 1), rawNum(r.pct, 2), r.cls, selLabel,
+          rawNum(r.total, 1), rawNum(r.covered, 1), rawNum(r.pct, 2), r.band,
+          r.overridden ? "handmatig toegevoegd" : "drempel " + state.threshold + "%",
+          selLabel,
         ]);
       });
     }
@@ -1200,7 +1314,7 @@
       "thr-out", "totals", "notice", "actions", "table-wrap", "table", "thead-row", "tbody", "empty",
       "show-below", "below-toggle", "btn-copy", "btn-codes", "btn-csv", "map-status", "legend",
       "toast", "help", "btn-help", "version", "show-all-parking", "show-labels", "tabbar",
-      "block-layer", "block-level"].forEach(function (id) {
+      "block-layer", "block-level", "picked", "block-clickmode", "clickmode-hint"].forEach(function (id) {
       el[id.replace(/-([a-z])/g, function (_, c) { return c.toUpperCase(); })] = document.getElementById(id);
     });
   }
@@ -1225,16 +1339,33 @@
 
   function paintTable(view) {
     var cols = columnsFor();
-    el.theadRow.innerHTML = cols.map(function (c) {
+    var pickable = state.mode === "forward";
+    var head = "";
+    if (pickable) {
+      head += '<th class="tick"><input type="checkbox" id="tick-all" ' +
+        'aria-label="Alle gebieden aan of uit"></th>';
+    }
+    head += cols.map(function (c) {
       var sortAttr = state.sort.key === c.key ? ' aria-sort="' + (state.sort.dir === "asc" ? "ascending" : "descending") + '"' : "";
       return "<th class=\"" + c.cls + "\"" + sortAttr + "><button type=\"button\" data-sort=\"" + c.key + "\">" + esc(c.label) + "</button></th>";
     }).join("");
+    el.theadRow.innerHTML = head;
+    if (pickable) {
+      var all = el.theadRow.querySelector("#tick-all");
+      var n = view.rows.length, on = view.rows.filter(function (r) { return r.counted; }).length;
+      all.checked = on > 0;
+      all.indeterminate = on > 0 && on < n;
+    }
 
     var frag = document.createDocumentFragment();
     view.rows.forEach(function (r) {
       var tr = document.createElement("tr");
       tr.dataset.code = r.code;
-      if (r.cls === "onderdrempel") tr.className = "below";
+      tr.dataset.auto = r.auto ? "1" : "0";
+      var klass = [];
+      if (!r.counted) klass.push("below");
+      if (r.overridden) klass.push(r.counted ? "added" : "removed");
+      tr.className = klass.join(" ");
       var pctCell = '<span class="glyph' + (r.cls === "onderdrempel" ? " g-below" : "") + '">' + GLYPH[r.cls] +
         "</span>" + fmtPct(r.pct) + " %" +
         '<span class="bar" aria-hidden="true"><i style="width:' + Math.max(2, Math.round(r.pct)) + '%"></i></span>';
@@ -1244,9 +1375,15 @@
           '<td class="num pct">' + pctCell + "</td>" +
           '<td class="num">' + fmtPct(r.pctOfParking) + " %</td>";
       } else {
+        var mark = r.overridden
+          ? ' <span class="badge-manual' + (r.counted ? " add" : " rem") + '">' +
+            (r.counted ? "handmatig aan" : "handmatig uit") + "</span>"
+          : "";
         tr.innerHTML =
+          '<td class="tick"><input type="checkbox" ' + (r.counted ? "checked " : "") +
+          'aria-label="' + esc(r.code) + " meetellen\"></td>" +
           '<td class="code">' + esc(r.code) + "</td>" +
-          '<td class="naam">' + esc(r.naam) + '<span class="sub wide">' + esc(r.gebiedNaam) +
+          '<td class="naam">' + esc(r.naam) + mark + '<span class="sub wide">' + esc(r.gebiedNaam) +
           (r.nSbd && state.level !== "sbd" ? " \u00b7 " + r.nSbd + " sbd" : "") + "</span></td>" +
           '<td class="num pct">' + pctCell + "</td>" +
           '<td class="num">' + fmtHa(r.covered) + "</td>";
@@ -1260,7 +1397,24 @@
     el.belowToggle.hidden = !(view.totals.nBelow > 0 || state.showBelow);
     if (view.totals.nBelow > 0) {
       el.belowToggle.querySelector("span").textContent =
-        "Ook de " + view.totals.nBelow + " gebieden onder de drempel tonen";
+        "Ook de " + view.totals.nBelow + " gebieden onder de drempel tonen, om ze alsnog aan te zetten";
+    }
+    var t = view.totals;
+    var edited = t.nAdded + t.nRemoved;
+    el.picked.hidden = state.mode !== "forward" || view.rows.length === 0;
+    if (!el.picked.hidden) {
+      el.picked.innerHTML =
+        "<span>" + fmtInt(t.n) + " van " + fmtInt(view.rows.length) + " aangevinkt" +
+        (edited
+          ? ' · <strong>' + (t.nRemoved ? fmtInt(t.nRemoved) + " handmatig uit" : "") +
+            (t.nRemoved && t.nAdded ? ", " : "") +
+            (t.nAdded ? fmtInt(t.nAdded) + " handmatig aan" : "") + "</strong>"
+          : "") +
+        "</span><span class=\"pick-actions\">" +
+        '<button type="button" data-pick="all">alles aan</button>' +
+        '<button type="button" data-pick="none">alles uit</button>' +
+        (edited ? '<button type="button" data-pick="reset">herstel drempel</button>' : "") +
+        "</span>";
     }
   }
 
@@ -1280,12 +1434,16 @@
     var lv = LEVELS[state.level];
     var main = fmtInt(t.n) + " " + (t.n === 1 ? lv.label : lv.plural);
     if (state.level !== "sbd") main += ' <span style="font-weight:400;color:var(--ink-3)">(uit ' + fmtInt(t.nSbd) + " subbuurtdelen)</span>";
+    var edits = [];
+    if (t.nRemoved) edits.push(fmtInt(t.nRemoved) + " handmatig uitgezet");
+    if (t.nAdded) edits.push(fmtInt(t.nAdded) + " handmatig toegevoegd");
     el.totals.innerHTML =
       '<div class="t-main">' + main + " \u00b7 " + fmtArea(t.area) + "</div>" +
       '<div class="t-sub">' + fmtInt(t.nFull) + " volledig \u00b7 " + fmtInt(t.nPartial) + " gedeeltelijk" +
       (t.nBelow ? " \u00b7 " + fmtInt(t.nBelow) + " onder de drempel niet meegeteld" : "") + "</div>" +
       '<div class="t-rule">' + esc(selectionLabel()) + " \u00b7 drempel \u2265 " + state.threshold +
-      " % van de oppervlakte van " + (state.level === "sbd" ? "het subbuurtdeel" : "de " + lv.label) + "</div>";
+      " % van de oppervlakte van " + (state.level === "sbd" ? "het subbuurtdeel" : "de " + lv.label) +
+      (edits.length ? ", daarna " + edits.join(" en ") : "") + "</div>";
   }
 
   function paintNotice(view) {
@@ -1356,6 +1514,16 @@
     el.search.placeholder = state.mode === "forward"
       ? (state.layer === "sectoren" ? "bijv. 75 of Oude Noorden" : "bijv. 750 of Oude Noorden")
       : "bijv. Oude Noorden of 053560";
+    var canRefine = state.mode === "forward" && state.selection[state.layer].size > 0;
+    el.blockClickmode.hidden = !canRefine;
+    document.querySelectorAll("[data-click]").forEach(function (b) {
+      b.setAttribute("aria-pressed", String(b.dataset.click === state.clickMode));
+    });
+    el.clickmodeHint.textContent = state.clickMode === "refine"
+      ? "Klik een " + LEVELS[state.level].label + " aan om hem wel of niet mee te tellen."
+      : "Klik een parkeervlak aan om het toe te voegen of te verwijderen.";
+    document.body.classList.toggle("refining", refining());
+
     var loading = Array.from(state.loading);
     el.mapStatus.hidden = loading.length === 0;
     if (loading.length) el.mapStatus.textContent = "kaartlaag wordt geladen\u2026";
@@ -1500,8 +1668,12 @@
       state.selection.sectoren.clear();
       state.selection.zones.clear();
       state.reverse.id = null;
-      setState({ hover: null, stack: null });
-      touch("selection", "reverse");
+      Object.keys(state.manual).forEach(function (lv) {
+        state.manual[lv].on.clear();
+        state.manual[lv].off.clear();
+      });
+      setState({ hover: null, stack: null, clickMode: "select" });
+      touch("selection", "reverse", "manual");
     };
 
     var debounce = 0;
@@ -1558,6 +1730,29 @@
         : (k === "code" || k === "naam" ? "asc" : "desc");
       setState({ sort: { key: k, dir: dir } });
     };
+    el.theadRow.onchange = function (ev) {
+      if (ev.target.id === "tick-all") setAllCounted(ev.target.checked);
+    };
+    el.tbody.onchange = function (ev) {
+      var box = ev.target;
+      if (box.type !== "checkbox") return;
+      var tr = box.closest("tr[data-code]");
+      if (tr) setCounted(tr.dataset.code, box.checked, tr.dataset.auto === "1");
+    };
+    el.picked.onclick = function (ev) {
+      var b = ev.target.closest("[data-pick]");
+      if (!b) return;
+      if (b.dataset.pick === "all") setAllCounted(true);
+      else if (b.dataset.pick === "none") setAllCounted(false);
+      else resetManual();
+    };
+    document.querySelectorAll("[data-click]").forEach(function (b) {
+      b.onclick = function () {
+        setState({ clickMode: b.dataset.click, stack: null });
+        if (b.dataset.click === "refine") ensureGeo(state.level);
+      };
+    });
+
     el.tbody.onmouseover = function (ev) {
       var tr = ev.target.closest("tr[data-code]");
       if (tr && (!state.hover || state.hover.id !== tr.dataset.code)) {
@@ -1568,6 +1763,7 @@
     el.tbody.onclick = function (ev) {
       var tr = ev.target.closest("tr[data-code]");
       if (!tr) return;
+      if (ev.target.closest("td.tick")) return;      // aanvinken mag niet ook zoomen
       var code = tr.dataset.code;
       if (state.mode === "reverse") {
         var geo = window.GD_GEO_SECTOREN.features.filter(function (f) { return String(f.id) === code; });
@@ -1586,8 +1782,9 @@
     };
     el.btnCodes.onclick = function () {
       var view = derive();
-      copyPlain(view.rows.map(function (r) { return r.code; }).join("\r\n"),
-        fmtInt(view.rows.length) + " codes gekopieerd");
+      var list = state.mode === "forward" ? view.counted : view.rows;
+      copyPlain(list.map(function (r) { return r.code; }).join("\r\n"),
+        fmtInt(list.length) + " codes gekopieerd");
     };
     el.btnCsv.onclick = function () { downloadCSV(exportMatrix(derive())); };
 

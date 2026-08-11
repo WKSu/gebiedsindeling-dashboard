@@ -382,6 +382,59 @@ tbody tr {
 }
 tbody tr:hover, tbody tr.hover { background: #fff8e8; }
 tbody tr.below { opacity: .55; }
+/* handmatig aangepast: links een streep in de kleur van de kaartopmaak */
+tbody tr.removed {
+  opacity: 1;
+  background: #fdf3f3;
+  box-shadow: inset 3px 0 0 #B4232A;
+}
+tbody tr.removed td.code, tbody tr.removed td.naam { text-decoration: line-through; color: var(--ink-3); }
+tbody tr.added { box-shadow: inset 3px 0 0 var(--select); }
+
+th.tick, td.tick { width: 30px; padding-left: 2px; padding-right: 2px; text-align: center; }
+th.tick input, td.tick input { accent-color: var(--accent); cursor: pointer; margin: 0; }
+tbody tr.removed td.tick input { accent-color: #B4232A; }
+
+.badge-manual {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  border-radius: 3px;
+  padding: 1px 4px;
+  margin-left: 4px;
+  white-space: nowrap;
+  vertical-align: 1px;
+}
+.badge-manual.add { background: #e4edff; color: #0b3f8f; }
+.badge-manual.rem { background: #fbe4e5; color: #8d1b21; }
+
+.picked {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0 15px 9px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.picked strong { color: #8d1b21; font-weight: 650; }
+.pick-actions { display: flex; gap: 5px; }
+.pick-actions button {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 5px;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.pick-actions button:hover { background: var(--surface-2); border-color: var(--ink-3); }
+
+/* in bijschaafstand wijst de cursor aan dat een klik iets aan/uit zet */
+body.refining .leaflet-container { cursor: pointer; }
 tbody td { padding: 5px; vertical-align: baseline; }
 td.code { font-family: var(--mono); font-size: 12.5px; font-weight: 600; letter-spacing: -.2px; }
 td.naam { font-size: 12.5px; }

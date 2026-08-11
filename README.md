@@ -43,6 +43,28 @@ Percentages zijn altijd `oppervlak binnen de selectie ÷ totale oppervlakte van 
 berekend in RD New (EPSG:28992). Nooit gedeeld door de som van de snijstukken — dat zou een
 snipper op 100 % zetten.
 
+## Zelf bijschaven
+
+De drempel is een *voorstel*. Geen enkele vaste regel klopt voor elke telopdracht, dus elk gebied
+in de lijst heeft een vinkje waarmee je het alsnog wel of niet meetelt:
+
+- **Uitzetten** — het vinkje weghalen. De rij blijft staan met een rode streep, zodat je hem kunt
+  terugzetten; op de kaart wordt het gebied rood gestreept en leeg.
+- **Toevoegen** — zet *Ook gebieden onder de drempel tonen* aan en vink een snipper alsnog aan. Op
+  de kaart krijgt die een blauwe stippellijn.
+- **Op de kaart** — zet *Klik op de kaart* op `zet gebied aan/uit`; dan schakelt elke klik het
+  gebied eronder in of uit in plaats van een sector te kiezen.
+- **Bulk** — `alles aan`, `alles uit` en `herstel drempel` onder de tabel.
+
+De totaalregel vermeldt altijd hoeveel je met de hand hebt gewijzigd, en de export bevat een kolom
+`Herkomst` (`drempel 10%` of `handmatig toegevoegd`), zodat een lijst achteraf navolgbaar blijft.
+Wat je kopieert is precies wat aangevinkt staat.
+
+Correcties horen bij het niveau waarop je werkt — wat je op subbuurtdeelniveau uitzet, geldt niet
+ineens ook voor buurten. Elk niveau houdt zijn eigen correcties bij, dus je kunt tussen niveaus
+wisselen zonder je werk te verliezen. Gebieden die volledig buiten de selectie liggen (0 %
+dekking) staan niet in de lijst en zijn dus ook niet aan te vinken.
+
 ## Overlappende sectoren
 
 Sector 99 (51,5 km²), 100 (47,3 km²) en 97 (8,4 km²) zijn stadsdekkende vlakken die over de
@@ -124,7 +146,7 @@ npm install jsdom && node test/test_app.mjs
 | `gen/*.js` | wat de site laadt (`window.GD_*`) |
 | `gen/*.json`, `gen/*.geojson` | dezelfde data los, voor hergebruik in QGIS of scripts |
 | `data/` | de bronshapefiles (RD New) |
-| `test/test_app.mjs` | regressietest (70 controles), inclusief het gouden geval sector 75 |
+| `test/test_app.mjs` | regressietest (104 controles), inclusief het gouden geval sector 75 |
 
 De datalaag is samen ongeveer 1,9 MB, gzipped ±425 KB. `gen/atoms.js` — het hart van de
 berekening — is maar 44 KB: 1678 stukjes en 311 unieke sleutelsets.

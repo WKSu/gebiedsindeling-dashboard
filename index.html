@@ -84,6 +84,15 @@
       <div class="chips" id="chips"></div>
     </div>
 
+    <div class="block" id="block-clickmode" hidden>
+      <span class="label">Klik op de kaart</span>
+      <div class="segmented" role="group" aria-label="Wat een klik op de kaart doet">
+        <button type="button" data-click="select" aria-pressed="true">kiest een sector</button>
+        <button type="button" data-click="refine" aria-pressed="false">zet gebied aan/uit</button>
+      </div>
+      <p class="fine" id="clickmode-hint"></p>
+    </div>
+
     <details class="block" id="block-level" open>
       <summary>Uitvoerniveau</summary>
       <div class="radios" id="levels">
@@ -141,6 +150,7 @@
       <button type="button" id="btn-codes">Kopieer codes</button>
       <button type="button" id="btn-csv">CSV</button>
     </div>
+    <div class="picked" id="picked" hidden></div>
     <div class="table-wrap" id="table-wrap" hidden>
       <table id="table">
         <thead><tr id="thead-row"></tr></thead>
@@ -164,6 +174,22 @@
         oppervlakte binnen de selectie liggen, met percentage en oppervlakte.</li>
     <li>Kopieer de lijst en plak hem in Excel. Codes met een voorloopnul blijven heel.</li>
   </ol>
+  <h3>Zelf gebieden aan- en uitzetten</h3>
+  <p>De drempel is een <em>voorstel</em>, niet het laatste woord. Elk gebied in de lijst heeft een
+     vinkje: haal het weg en het telt niet meer mee. Wil je juist iets toevoegen dat onder de
+     drempel valt, zet dan <strong>Ook gebieden onder de drempel tonen</strong> aan en vink het
+     alsnog aan.</p>
+  <p>Wat je zelf aanpast blijft zichtbaar: uitgezette gebieden blijven in de lijst staan met een
+     rode streep (op de kaart rood gestreept en leeg), toegevoegde gebieden krijgen een blauwe
+     stippellijn. De totaalregel vermeldt hoeveel je met de hand hebt gewijzigd, en met
+     <strong>herstel drempel</strong> ga je terug naar het voorstel.</p>
+  <p>Liever op de kaart werken? Zet <strong>Klik op de kaart</strong> op <em>zet gebied aan/uit</em>;
+     dan schakelt elke klik het gebied eronder in of uit in plaats van een sector te kiezen. Wat je
+     kopieert of exporteert is altijd precies wat aangevinkt staat, met een kolom
+     <code>Herkomst</code> die aangeeft of een gebied uit de drempel komt of door jou is toegevoegd.</p>
+  <p>Correcties horen bij het niveau waarop je werkt: wat je op subbuurtdeelniveau uitzet geldt niet
+     ineens ook voor buurten. Elk niveau houdt zijn eigen correcties bij.</p>
+
   <h3>Waarom soms een percentage onder 100&nbsp;%?</h3>
   <p>Omdat een sectorgrens dwars door een subbuurtdeel kan lopen. Het percentage zegt hoeveel
      van dat subbuurtdeel binnen je selectie valt. Kleine snippers langs de rand vallen onder

@@ -24,9 +24,11 @@ function check(name, cond, extra) {
 function makeL() {
   const bounds = () => ({ isValid: () => true, contains: () => true });
   const panes = {};
+  const handlers = {};
   const map = {
     _layers: new Set(),
-    on() {}, off() {},
+    on(ev, fn) { String(ev).split(" ").forEach((e) => { (handlers[e] = handlers[e] || []).push(fn); }); },
+    off() {},
     createPane(n) { return (panes[n] = { style: {}, classList: { add() {} } }); },
     getPane(n) { return panes[n] || (panes[n] = { style: {}, classList: { add() {} } }); },
     getZoom: () => 13,
@@ -67,6 +69,13 @@ function makeL() {
     latLngBounds: () => bounds(),
     Browser: {},
   };
+  /** Bootst een echte kaartklik na, zodat de eigen punt-in-vlak-test meeloopt. */
+  map._fire = (ev, lng, lat, mods) => {
+    (handlers[ev] || []).forEach((fn) => fn({
+      latlng: { lat: lat, lng: lng },
+      originalEvent: Object.assign({ ctrlKey: false, metaKey: false, preventDefault() {} }, mods || {}),
+    }));
+  };
   return { L, map };
 }
 
@@ -106,7 +115,11 @@ for (const f of ["gen/meta.js", "gen/atoms.js", "gen/tir.js", "gen/parking.js",
 /* ── helpers ────────────────────────────────────────────────────────────── */
 const doc = win.document;
 const rows = () => Array.from(doc.querySelectorAll("#tbody tr"));
-const cells = (tr) => Array.from(tr.children).map((td) => td.textContent.trim());
+/** Celinhoud zonder de aanvinkkolom, zodat kolomindexen stabiel blijven. */
+const cells = (tr) => Array.from(tr.children)
+  .filter((td) => !td.classList.contains("tick"))
+  .map((td) => td.textContent.trim());
+const ticked = (tr) => { const b = tr.querySelector("td.tick input"); return b ? b.checked : null; };
 const totals = () => doc.getElementById("totals").textContent.replace(/\s+/g, " ").trim();
 const notice = () => doc.getElementById("notice").textContent;
 const chips = () => doc.querySelectorAll("#chips .chip").length;
@@ -331,8 +344,138 @@ await pickSector75();
 check("legenda benoemt in voorwaartse modus de gekozen sector",
   /gekozen sector/.test(el("legend").textContent), el("legend").textContent.replace(/\s+/g, " "));
 
-/* ── 10. export ─────────────────────────────────────────────────────────── */
-log("\n10. Export naar Excel");
+/* ── 10. handmatig aan/uit ──────────────────────────────────────────────── */
+log("\n10. Gebieden handmatig aan- en uitzetten");
+await clearAll();
+await pickSector75();
+check("elke rij heeft een vinkje en staat aan", rows().every((tr) => ticked(tr) === true));
+check("kopregel heeft een vinkje voor alles", !!el("tick-all"));
+check("regel onder de tabel toont de stand", /11 van 11 aangevinkt/.test(el("picked").textContent),
+  el("picked").textContent.replace(/\s+/g, " "));
+
+// een rij uitzetten
+const target = rows().find((tr) => cells(tr)[0] === "053570") || rows()[3];
+const targetCode = cells(target)[0];
+target.querySelector("td.tick input").click();
+await waitFor(() => /10 van 11 aangevinkt/.test(el("picked").textContent), "10 van 11 na uitzetten");
+const removedRow = rows().find((tr) => cells(tr)[0] === targetCode);
+check("uitgezette rij blijft staan (anders kun je hem niet terugzetten)", !!removedRow);
+check("uitgezette rij is gemarkeerd als handmatig uit",
+  removedRow && removedRow.classList.contains("removed") && ticked(removedRow) === false);
+check("badge 'handmatig uit' in de rij", removedRow && /handmatig uit/.test(removedRow.textContent));
+check("totalen melden 10 subbuurtdelen", /\b10 subbuurtdelen/.test(totals()), totals());
+check("totalen benoemen de handmatige ingreep", /1 handmatig uitgezet/.test(totals()), totals());
+check("kopvinkje staat op gedeeltelijk", el("tick-all").indeterminate === true);
+
+// export volgt de curatie, niet de drempel
+let cText = null;
+win.navigator.clipboard = { writeText: async (t) => { cText = t; }, write: async () => {} };
+el("btn-codes").click();
+await waitFor(() => cText !== null, "codes na uitzetten");
+check("export laat de uitgezette code weg",
+  cText.split("\r\n").length === 10 && cText.indexOf(targetCode) === -1,
+  cText.split("\r\n").length + " codes");
+
+// terugzetten
+removedRow.querySelector("td.tick input").click();
+await waitFor(() => /11 van 11 aangevinkt/.test(el("picked").textContent), "terug op 11");
+check("terugzetten herstelt de rij", rows().length === 11 && rows().every((tr) => ticked(tr) === true));
+check("geen handmatige melding meer in de totalen", !/handmatig/.test(totals()), totals());
+
+// een gebied onder de drempel alsnog meetellen
+el("show-below").checked = true;
+fire(el("show-below"), "change");
+await waitFor(() => rows().length === 23, "snippers zichtbaar");
+const belowRow = rows().find((tr) => cells(tr)[0] === "051530");
+check("051530 (9,33 %) staat er als niet-aangevinkt bij", belowRow && ticked(belowRow) === false);
+belowRow.querySelector("td.tick input").click();
+await waitFor(() => /12 van 23 aangevinkt/.test(el("picked").textContent), "12 aangevinkt");
+const addedRow = rows().find((tr) => cells(tr)[0] === "051530");
+check("handmatig toegevoegd gebied is gemarkeerd",
+  addedRow && addedRow.classList.contains("added") && /handmatig aan/.test(addedRow.textContent));
+check("totalen melden 12 subbuurtdelen", /\b12 subbuurtdelen/.test(totals()), totals());
+check("totalen benoemen de toevoeging", /1 handmatig toegevoegd/.test(totals()), totals());
+
+let mFlav = null;
+win.Blob = class { constructor(p) { this._t = p.join(""); } };
+win.ClipboardItem = class { constructor(m) { this.map = m; } };
+win.navigator.clipboard = { write: async (i) => { mFlav = i[0].map; }, writeText: async () => {} };
+el("btn-copy").click();
+await waitFor(() => mFlav !== null, "tabel na toevoegen");
+const tsvM = mFlav["text/plain"]._t;
+const addedLine = tsvM.split("\r\n").find((l) => l.startsWith("051530"));
+check("export bevat het toegevoegde gebied", !!addedLine, "geen regel voor 051530");
+check("export vermeldt de herkomst 'handmatig toegevoegd'",
+  addedLine && addedLine.includes("handmatig toegevoegd"), addedLine);
+check("export noemt de dekkingsklasse, niet 'onderdrempel'",
+  addedLine && addedLine.includes("marginaal") && !tsvM.includes("onderdrempel"), addedLine);
+check("kopregel heeft Herkomst-kolom", tsvM.split("\r\n")[0].includes("Herkomst"));
+
+// bulkacties
+el("picked").querySelector('[data-pick="none"]').click();
+await waitFor(() => /0 van 23 aangevinkt/.test(el("picked").textContent), "alles uit");
+check("'alles uit' zet alles uit", /0 van 23 aangevinkt/.test(el("picked").textContent));
+el("picked").querySelector('[data-pick="all"]').click();
+await waitFor(() => /23 van 23 aangevinkt/.test(el("picked").textContent), "alles aan");
+check("'alles aan' zet alles aan", /23 van 23 aangevinkt/.test(el("picked").textContent));
+el("picked").querySelector('[data-pick="reset"]').click();
+await waitFor(() => /11 van 23 aangevinkt/.test(el("picked").textContent), "herstel drempel");
+check("'herstel drempel' brengt de drempelkeuze terug",
+  /11 van 23 aangevinkt/.test(el("picked").textContent) && !/handmatig/.test(totals()),
+  el("picked").textContent.replace(/\s+/g, " "));
+el("show-below").checked = false;
+fire(el("show-below"), "change");
+await waitFor(() => rows().length === 11, "terug naar 11");
+
+// overrides zijn per niveau, dus wisselen van niveau gooit niets door de war
+rows()[0].querySelector("td.tick input").click();
+await waitFor(() => /10 van 11 aangevinkt/.test(el("picked").textContent), "1 uit op sbd-niveau");
+setRadio("level", "bu");
+await waitFor(() => cells(rows()[0])[0].length === 4, "buurtniveau");
+check("buurtniveau is niet geraakt door de correctie op subbuurtdeelniveau",
+  !/handmatig/.test(totals()), totals());
+setRadio("level", "sbd");
+await waitFor(() => cells(rows()[0])[0].length === 6, "terug naar subbuurtdeel");
+check("correctie op subbuurtdeelniveau is bewaard",
+  /1 handmatig uitgezet/.test(totals()), totals());
+el("picked").querySelector('[data-pick="reset"]').click();
+await waitFor(() => !/handmatig/.test(totals()), "opgeruimd");
+
+/* ── 11. kaartklik ──────────────────────────────────────────────────────── */
+log("\n11. Klikken op de kaart");
+const sec75 = win.GD_PARKING.sectoren.find((s) => s.id === "75");
+await clearAll();
+// standaard: een klik kiest een sector, en wel de kleinste (99/100 liggen erover)
+stub.map._fire("click", sec75.center[0], sec75.center[1]);
+await waitFor(() => chips() === 1, "sector gekozen via kaartklik");
+check("kaartklik kiest de kleinste sector, niet de stadsdekkende",
+  doc.querySelector("#chips .chip").textContent.startsWith("Sector 75"),
+  doc.querySelector("#chips .chip").textContent);
+check("klik in het water selecteert niets", (() => {
+  stub.map._fire("click", 4.0, 51.7);
+  return chips() === 1;
+})());
+
+check("keuzeknop voor de kaartklik verschijnt zodra er een selectie is", !el("block-clickmode").hidden);
+doc.querySelector('[data-click="refine"]').click();
+await waitFor(() => doc.body.classList.contains("refining"), "bijschaafstand actief");
+check("bijschaafstand aan", doc.body.classList.contains("refining"));
+stub.map._fire("click", sec75.center[0], sec75.center[1]);
+await waitFor(() => /10 van 11 aangevinkt/.test(el("picked").textContent), "kaartklik zette een gebied uit");
+check("in bijschaafstand zet een kaartklik een gebied uit, niet de sector",
+  chips() === 1 && /10 van 11 aangevinkt/.test(el("picked").textContent),
+  el("picked").textContent.replace(/\s+/g, " "));
+check("dat gebied is als handmatig uit gemarkeerd", rows().some((tr) => tr.classList.contains("removed")));
+stub.map._fire("click", sec75.center[0], sec75.center[1]);
+await waitFor(() => /11 van 11 aangevinkt/.test(el("picked").textContent), "nog een klik zet hem terug");
+check("nog een klik zet hem weer aan", /11 van 11 aangevinkt/.test(el("picked").textContent));
+check("kaartlagen tonen de handmatige stand", layersIn("gd-result").length > 0);
+doc.querySelector('[data-click="select"]').click();
+await waitFor(() => !doc.body.classList.contains("refining"), "terug naar sector kiezen");
+check("terug naar sector kiezen", !doc.body.classList.contains("refining"));
+
+/* ── 12. export ─────────────────────────────────────────────────────────── */
+log("\n12. Export naar Excel");
 
 let copiedText = null, copiedFlavours = null;
 class FakeBlob { constructor(parts) { this._t = parts.join(""); } text() { return Promise.resolve(this._t); } }
