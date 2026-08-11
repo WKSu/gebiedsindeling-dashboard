@@ -150,6 +150,7 @@
     { fn: paintParkingLayer, deps: ["layer", "selection", "showAllParking", "mode", "@rows"] },
     { fn: paintLabels, deps: ["layer", "showLabels", "mode", "selection"] },
     { fn: paintResultLayer, deps: ["@rows", "level", "showBelow", "loaded", "mode", "reverse"] },
+    { fn: paintOutlineLayer, deps: ["selection", "layer", "mode", "reverse", "loaded"] },
     { fn: paintHoverLayer, deps: ["hover", "@rows", "loaded", "mode"] },
     { fn: paintStack, deps: ["stack"] },
     { fn: paintTabs, deps: ["tab"] },
@@ -630,8 +631,8 @@
   /* ═════════════════════════════════════════════════════════ 8. KAART ══ */
 
   var map, brtLayer = null;
-  var rParking, rResult, rHover;
-  var parkingLayer = null, resultLayer = null, hoverLayer = null, unitLayer = null;
+  var rParking, rResult, rOutline, rHover;
+  var parkingLayer = null, resultLayer = null, hoverLayer = null, outlineLayer = null;
   var labelLayer = null;
   var stackPopup = null;
   var geoIndexByLevel = {};
@@ -643,15 +644,18 @@
     });
     L.control.zoom({ position: "bottomright" }).addTo(map);
 
-    map.createPane("gd-parking").style.zIndex = 405;
-    map.createPane("gd-result").style.zIndex = 410;
+    map.createPane("gd-parking").style.zIndex = 405;   // context: overige vlakken
+    map.createPane("gd-result").style.zIndex = 410;    // dekkingsvlakken
+    map.createPane("gd-outline").style.zIndex = 415;   // grens van de selectie
     map.createPane("gd-hover").style.zIndex = 420;
     map.createPane("gd-label").style.zIndex = 430;
     map.getPane("gd-hover").classList.add("gd-hover-pane");
+    map.getPane("gd-outline").style.pointerEvents = "none";
     map.getPane("gd-label").style.pointerEvents = "none";
 
     rParking = L.canvas({ pane: "gd-parking", padding: 0.3 });
     rResult = L.svg({ pane: "gd-result", padding: 0.3 });
+    rOutline = L.svg({ pane: "gd-outline", padding: 0.5 });
     rHover = L.svg({ pane: "gd-hover", padding: 0.5 });
 
     map.on("click", onMapClick);
@@ -732,34 +736,87 @@
     }
   }
 
+  /** Contourenlaag: alle NIET-geselecteerde parkeervlakken, als context.
+   *
+   *  Zodra er iets geselecteerd is wordt deze laag bewust flauw: met 67 sectoren
+   *  op gelijke lijndikte verdrinkt de grens die je juist wilt zien. De selectie
+   *  zelf zit in paintOutlineLayer, in een pane boven de dekkingsvlakken.
+   */
   function paintParkingLayer(view) {
     if (parkingLayer) { map.removeLayer(parkingLayer); parkingLayer = null; }
     if (!state.showAllParking) return;
-    var geo = state.mode === "forward"
-      ? (state.layer === "sectoren" ? window.GD_GEO_SECTOREN : window.GD_GEO_ZONES)
-      : window.GD_GEO_SECTOREN;
-    var sel = state.mode === "forward" ? state.selection[state.layer] : new Set();
-    var prefix = state.mode === "forward" ? (state.layer === "sectoren" ? "S" : "Z") : "S";
+    var forward = state.mode === "forward";
+    var geo = forward && state.layer === "zones" ? window.GD_GEO_ZONES : window.GD_GEO_SECTOREN;
+    var sel = forward ? state.selection[state.layer] : new Set();
+    var prefix = forward && state.layer === "zones" ? "Z" : "S";
     var containers = new Set();
-    (state.mode === "forward" && state.layer === "zones" ? P.zones : P.sectoren).forEach(function (m) {
+    (forward && state.layer === "zones" ? P.zones : P.sectoren).forEach(function (m) {
       if (m.container) containers.add(m.id);
     });
+    var busy = sel.size > 0 || (!forward && !!state.reverse.id);
     var noBase = state.basemap === "none";
-    parkingLayer = L.geoJSON(geo, {
+    var feats = geo.features.filter(function (f) {
+      var id = String(f.id);
+      if (sel.has(prefix + id)) return false;              // die tekent de contourlaag
+      if (containers.has(id)) return false;                // stadsdekkend: alleen als je hem kiest
+      return true;
+    });
+    if (!feats.length) return;
+    var base = noBase ? "#3C4650" : "#5B6570";
+    parkingLayer = L.geoJSON({ type: "FeatureCollection", features: feats }, {
       renderer: rParking,
       pane: "gd-parking",
       interactive: false,
-      style: function (f) {
-        var id = String(f.id);
-        if (sel.has(prefix + id)) {
-          return { color: "#0F62FE", weight: 3, opacity: 1, fill: true, fillColor: "#0F62FE", fillOpacity: 0.05 };
-        }
-        if (containers.has(id)) {
-          return { color: "#6A3D9A", weight: 2, opacity: 0.85, dashArray: "10 6", fill: false };
-        }
-        return { color: noBase ? "#3C4650" : "#5B6570", weight: 1, opacity: noBase ? 0.75 : 0.55, fill: false };
+      style: function () {
+        return busy
+          ? { color: base, weight: 0.8, opacity: noBase ? 0.3 : 0.22, fill: false }
+          : { color: base, weight: 1, opacity: noBase ? 0.75 : 0.55, fill: false };
       },
     }).addTo(map);
+  }
+
+  /** De grens van de gekozen sector/zone (of, omgekeerd, van het gekozen gebied).
+   *
+   *  Twee strepen over elkaar: eerst een witte omranding, daarna de lijn zelf.
+   *  Daardoor blijft de grens leesbaar op de achtergrondkaart, op een groene
+   *  vulling en op wit, zonder dat er een dikke lijn hoeft die de vorm vervalst.
+   */
+  function paintOutlineLayer(view) {
+    if (outlineLayer) { map.removeLayer(outlineLayer); outlineLayer = null; }
+    var feats = [], accent, prefix = null;
+    if (state.mode === "forward") {
+      var sel = state.selection[state.layer];
+      if (!sel.size) return;
+      var geo = state.layer === "zones" ? window.GD_GEO_ZONES : window.GD_GEO_SECTOREN;
+      prefix = state.layer === "zones" ? "Z" : "S";
+      feats = geo.features.filter(function (f) { return sel.has(prefix + String(f.id)); });
+      accent = "#0F62FE";
+    } else {
+      if (!state.reverse.id || !state.loaded.has(state.reverse.level)) return;
+      feats = geoFor(state.reverse.level).features.filter(function (f) {
+        return String(f.id) === state.reverse.id;
+      });
+      accent = "#111827";
+    }
+    if (!feats.length) return;
+    var fc = { type: "FeatureCollection", features: feats };
+    function ring(opts) {
+      return L.geoJSON(fc, {
+        renderer: rOutline, pane: "gd-outline", interactive: false, style: opts,
+      });
+    }
+    outlineLayer = L.layerGroup([
+      ring({ color: "#ffffff", weight: 8, opacity: 0.85, fill: false, lineJoin: "round", lineCap: "round" }),
+      // per vlak streepjes: een stadsdekkende sector volgt de stadsrand en moet
+      // niet als een gewone sectorgrens gelezen worden
+      ring(function (f) {
+        var p = prefix ? PARK.get(prefix + String(f.id)) : null;
+        return {
+          color: accent, weight: 3.5, opacity: 1, fill: false, lineJoin: "round",
+          dashArray: p && p.container ? "12 7" : null,
+        };
+      }),
+    ]).addTo(map);
   }
 
   function paintLabels() {
@@ -768,17 +825,20 @@
     if (map.getZoom() < CFG.LABEL_MIN_ZOOM) return;
     var list = state.mode === "forward" && state.layer === "zones" ? P.zones : P.sectoren;
     var sel = state.mode === "forward" ? state.selection[state.layer] : new Set();
+    var busy = sel.size > 0;
     var markers = [];
     list.forEach(function (m) {
       if (m.container) return;                     // stadsdekkend: label zou nergens kloppen
+      var on = sel.has(m.key);
+      if (busy && !state.showAllParking && !on) return;
       markers.push(
         L.marker([m.center[1], m.center[0]], {
           pane: "gd-label",
           interactive: false,
           keyboard: false,
           icon: L.divIcon({
-            className: "sector-label",
-            html: sel.has(m.key) ? "<b>" + esc(m.id) + "</b>" : esc(m.id),
+            className: "sector-label" + (on ? " on" : busy ? " dim" : ""),
+            html: esc(m.id),
             iconSize: null,
           }),
         })
@@ -790,17 +850,19 @@
   function styleForRow(row, simplified) {
     if (state.mode === "reverse") {
       return {
-        pane: "gd-result", color: "#3B2668", weight: 1.4, opacity: 0.95,
+        pane: "gd-result", color: "#3B2668", weight: 1.2, opacity: 0.7,
         fill: true, fillColor: "#5B3E9B",
         fillOpacity: simplified || row.cls !== "volledig" ? (row.cls === "volledig" ? 0.55 : row.cls === "grotendeels" ? 0.3 : 0.15) : 0.55,
         className: simplified ? "" : "cov-" + row.cls,
       };
     }
     if (row.cls === "onderdrempel") {
-      return { pane: "gd-result", color: "#8A9099", weight: 1, opacity: 0.9, dashArray: "2 4", fill: false };
+      return { pane: "gd-result", color: "#8A9099", weight: 1, opacity: 0.85, dashArray: "2 4", fill: false };
     }
+    // Binnengrenzen tussen de gevonden vlakken blijven dun en halftransparant: de
+    // buitengrens van de selectie moet de sterkste lijn op de kaart zijn.
     var base = {
-      pane: "gd-result", color: "#0E5943", weight: 1, opacity: 0.95,
+      pane: "gd-result", color: "#0E5943", weight: 0.9, opacity: 0.6,
       fill: true, fillColor: "#1B7F5F",
       dashArray: row.cls === "gedeeltelijk" ? "4 3" : null,
     };
@@ -816,22 +878,9 @@
 
   function paintResultLayer(view) {
     if (resultLayer) { map.removeLayer(resultLayer); resultLayer = null; }
-    if (unitLayer) { map.removeLayer(unitLayer); unitLayer = null; }
 
     if (state.mode === "reverse") {
-      if (state.reverse.id) {
-        ensureGeo(state.reverse.level);
-        var g = geoFor(state.reverse.level);
-        if (g) {
-          var uf = g.features.filter(function (f) { return String(f.id) === state.reverse.id; });
-          if (uf.length) {
-            unitLayer = L.geoJSON({ type: "FeatureCollection", features: uf }, {
-              renderer: rHover, pane: "gd-hover", interactive: false,
-              style: { color: "#111", weight: 3, opacity: 0.95, fill: false },
-            }).addTo(map);
-          }
-        }
-      }
+      if (state.reverse.id) ensureGeo(state.reverse.level);
       var wantR = new Map();
       view.rows.forEach(function (r) { wantR.set(r.code, r); });
       var geoP = window.GD_GEO_SECTOREN;
@@ -1334,9 +1383,11 @@
       row("background:" + c + ";opacity:.62", "volledig") +
       row("background:" + c + ";opacity:.34", "50\u201399 %") +
       row("background:" + c + ";opacity:.16", state.threshold + "\u201350 %") +
-      row("border:1px dashed #8A9099", "onder de drempel") +
-      (rev ? "" : row("border:2px dashed #6A3D9A", "stadsdekkend")) +
-      (rev ? "" : row("border:2px solid #0F62FE", "geselecteerd"));
+      row("border:1px dashed #8A9099;background:none", "onder de drempel") +
+      "<b style='margin-top:5px'>Grenzen</b>" +
+      row("height:0;border-top:3px solid " + (rev ? "#111827" : "#0F62FE") + ";box-shadow:0 0 0 1.5px #fff",
+        rev ? "gekozen gebied" : "gekozen " + (state.layer === "zones" ? "zone" : "sector")) +
+      row("height:0;border-top:1px solid #5B6570;opacity:.5", "overige parkeervlakken");
   }
 
   function paintChips() {

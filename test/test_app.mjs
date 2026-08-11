@@ -42,16 +42,26 @@ function makeL() {
     canvas: () => ({}), svg: () => ({}),
     tileLayer: () => { const t = { addTo: () => (map.addLayer(t), t) }; return t; },
     geoJSON: (data, opts) => {
-      // stijlfunctie meteen uitvoeren: dat vangt fouten in styleForRow
-      if (opts && typeof opts.style === "function" && data && data.features) {
-        data.features.forEach((f) => opts.style(f));
-      }
-      const l = { _n: data && data.features ? data.features.length : 0 };
+      const feats = (data && data.features) || [];
+      // stijlfunctie meteen uitvoeren: dat vangt fouten in styleForRow op en
+      // legt de opgeleverde stijlen vast zodat de test de opmaak kan nakijken
+      const styles = typeof (opts && opts.style) === "function"
+        ? feats.map((f) => opts.style(f))
+        : feats.map(() => opts && opts.style).filter(Boolean);
+      const l = {
+        _kind: "geoJSON", _n: feats.length, _pane: opts && opts.pane,
+        _ids: feats.map((f) => String(f.id)), _styles: styles,
+      };
       l.addTo = () => (map.addLayer(l), l);
       l.remove = () => {};
       return l;
     },
-    layerGroup: (arr) => { const l = { _arr: arr }; l.addTo = () => (map.addLayer(l), l); l.remove = () => {}; return l; },
+    layerGroup: (arr) => {
+      const l = { _kind: "layerGroup", _arr: arr || [] };
+      l.addTo = () => (map.addLayer(l), l);
+      l.remove = () => {};
+      return l;
+    },
     marker: () => ({}), divIcon: () => ({}),
     popup: () => ({ setLatLng() { return this; }, setContent() { return this; }, openOn() { return this; } }),
     latLngBounds: () => bounds(),
@@ -74,7 +84,17 @@ const dom = new JSDOM(html, {
   runScripts: "outside-only", url: "http://localhost/", pretendToBeVisual: true, virtualConsole: vc,
 });
 const win = dom.window;
-win.L = makeL().L;
+const stub = makeL();
+win.L = stub.L;
+/** Alle kaartlagen in een pane, inclusief die binnen een layerGroup. */
+function layersIn(pane) {
+  const out = [];
+  for (const l of stub.map._layers) {
+    if (l._kind === "layerGroup") l._arr.forEach((c) => { if (c._pane === pane) out.push(c); });
+    else if (l._pane === pane) out.push(l);
+  }
+  return out;
+}
 if (!win.matchMedia) win.matchMedia = () => ({ matches: false, addListener() {}, removeListener() {} });
 
 for (const f of ["gen/meta.js", "gen/atoms.js", "gen/tir.js", "gen/parking.js",
@@ -241,11 +261,78 @@ check("kolom '% van gebied' aanwezig", el("thead-row").textContent.includes("% v
 check("kolom '% van vlak' aanwezig", el("thead-row").textContent.includes("% van vlak"));
 check("melding dat percentages samen boven 100 % kunnen komen", /boven 100 %/.test(totals()), totals());
 
-/* ── 9. export ──────────────────────────────────────────────────────────── */
-log("\n9. Export naar Excel");
+/* ── 9. leesbaarheid van de grenzen ─────────────────────────────────────── */
+log("\n9. Grens van de selectie");
 setRadio("mode", "forward");
 await clearAll();
 await pickSector75();
+await waitFor(() => layersIn("gd-outline").length > 0, "contourlaag getekend");
+
+const outline = layersIn("gd-outline");
+check("selectiegrens zit in een eigen pane boven de dekkingsvlakken", outline.length === 2,
+  `${outline.length} lagen`);
+const casing = outline[0] && outline[0]._styles[0];
+const accent = outline[1] && outline[1]._styles[0];
+check("grens is dubbel getekend: witte omranding onder de lijn",
+  casing && casing.color === "#ffffff" && casing.weight > (accent ? accent.weight : 99),
+  JSON.stringify(casing));
+check("de lijn zelf is dik en volledig dekkend",
+  accent && accent.weight >= 3 && accent.opacity === 1 && accent.fill === false, JSON.stringify(accent));
+check("contourlaag bevat alleen de gekozen sector", outline[1]._ids.join(",") === "75", outline[1]._ids.join(","));
+
+const ctx = layersIn("gd-parking")[0];
+check("overige parkeervlakken staan in de contextlaag", !!ctx && ctx._n > 50, ctx ? String(ctx._n) : "geen");
+check("de gekozen sector zit NIET dubbel in de contextlaag", ctx && ctx._ids.indexOf("75") === -1);
+check("stadsdekkende sectoren worden niet als ruis meegetekend",
+  ctx && ["97", "99", "100"].every((id) => ctx._ids.indexOf(id) === -1), (ctx ? ctx._ids : []).join(",").slice(0, 40));
+check("contextlijnen wijken terug zodra er een selectie is",
+  ctx && ctx._styles[0].opacity < 0.3 && ctx._styles[0].weight < 1, JSON.stringify(ctx && ctx._styles[0]));
+
+const res = layersIn("gd-result")[0];
+check("dekkingsvlakken hebben dunne, halftransparante binnengrenzen",
+  res && res._styles[0].weight < 1 && res._styles[0].opacity < 0.7, JSON.stringify(res && res._styles[0]));
+check("binnengrens is duidelijk zwakker dan de selectiegrens",
+  res && accent && res._styles[0].weight * res._styles[0].opacity < accent.weight * accent.opacity / 3);
+
+// gemengde selectie: alleen de stadsdekkende sector krijgt streepjes
+await typeAndEnter("99");
+await waitFor(() => layersIn("gd-outline").length === 2 && layersIn("gd-outline")[1]._ids.length === 2,
+  "contour om beide sectoren");
+const mixed = layersIn("gd-outline")[1];
+const dashBy = {};
+mixed._ids.forEach((id, i) => { dashBy[id] = mixed._styles[i].dashArray; });
+check("stadsdekkende sector 99 krijgt een streepjeslijn", !!dashBy["99"], JSON.stringify(dashBy));
+check("gewone sector 75 houdt een doorlopende lijn", !dashBy["75"], JSON.stringify(dashBy));
+
+// zonder selectie mogen de contourlijnen weer normaal aanzetten
+await clearAll();
+await waitFor(() => layersIn("gd-outline").length === 0, "contourlaag weg na wissen");
+const ctx0 = layersIn("gd-parking")[0];
+check("zonder selectie geen selectiegrens meer", layersIn("gd-outline").length === 0);
+check("zonder selectie zijn de contourlijnen weer normaal zichtbaar",
+  ctx0 && ctx0._styles[0].opacity > 0.5, JSON.stringify(ctx0 && ctx0._styles[0]));
+
+// omgekeerde modus: het gekozen gebied krijgt dezelfde nadruk
+setRadio("mode", "reverse");
+await typeAndEnter("051500");
+await waitFor(() => layersIn("gd-outline").length === 2, "contour om het gekozen gebied");
+const revOutline = layersIn("gd-outline");
+check("ook het gekozen gebied krijgt een dubbele grens", revOutline.length === 2);
+check("contour ligt om subbuurtdeel 051500", revOutline[1]._ids.join(",") === "051500", revOutline[1]._ids.join(","));
+check("in omgekeerde modus is de lijn donker in plaats van blauw",
+  revOutline[1]._styles[0].color === "#111827", revOutline[1]._styles[0].color);
+
+check("legenda benoemt de gekozen grens",
+  /Grenzen/.test(el("legend").textContent) && /gekozen gebied/.test(el("legend").textContent),
+  el("legend").textContent.replace(/\s+/g, " "));
+setRadio("mode", "forward");
+await clearAll();
+await pickSector75();
+check("legenda benoemt in voorwaartse modus de gekozen sector",
+  /gekozen sector/.test(el("legend").textContent), el("legend").textContent.replace(/\s+/g, " "));
+
+/* ── 10. export ─────────────────────────────────────────────────────────── */
+log("\n10. Export naar Excel");
 
 let copiedText = null, copiedFlavours = null;
 class FakeBlob { constructor(parts) { this._t = parts.join(""); } text() { return Promise.resolve(this._t); } }

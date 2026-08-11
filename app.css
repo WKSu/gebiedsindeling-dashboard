@@ -477,6 +477,13 @@ tr.below .bar i { background: var(--ink-3); }
   white-space: nowrap;
   pointer-events: none;
 }
+/* zodra er een selectie is, wijken de overige nummers terug */
+.sector-label.dim { opacity: .4; font-weight: 600; }
+.sector-label.on {
+  font-size: 13px;
+  color: #0b3f8f;
+  text-shadow: 0 0 4px #fff, 0 0 4px #fff, 0 0 6px #fff, 0 0 8px #fff;
+}
 .leaflet-pane.gd-hover-pane { pointer-events: none; }
 .leaflet-container { font-family: var(--font); }
 .leaflet-container a.leaflet-popup-close-button { padding: 6px 6px 0 0; }

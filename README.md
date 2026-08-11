@@ -57,6 +57,28 @@ Dat laatste werkt via een *atomaire overlay*: bij het bouwen wordt elk subbuurtd
 in stukjes met een unieke set overlappende parkeervlakken. De dekking van een selectie is dan
 de som van de stukjes waarvan de set de selectie raakt — per definitie geen dubbeltelling.
 
+## Hoe de kaart leest
+
+Met 67 sectoren op de kaart is lijnenruis het grootste leesprobleem, dus de opmaak heeft een
+duidelijke rangorde:
+
+1. **De grens van je keuze** is de sterkste lijn: 3,5 px in kleur met een witte omranding
+   eronder, in een eigen laag *boven* de gekleurde vlakken. Die witte rand is wat de grens
+   leesbaar houdt op de achtergrondkaart, op een groene vulling en op wit — zonder dat de lijn
+   zo dik moet worden dat hij de vorm vervalst.
+2. **De gevonden gebieden** krijgen de dekkingskleur met dunne, halftransparante binnengrenzen
+   (0,9 px op 60 %), zodat ze als één massa lezen in plaats van als een raster.
+3. **De overige parkeervlakken** staan er als dunne grijze lijnen bij en worden nóg lichter
+   (0,8 px op 22 %) zodra je iets kiest. Ook de nummers van niet-gekozen sectoren dimmen dan.
+
+De drie stadsdekkende sectoren (99, 100, 97) worden **niet** als achtergrond getekend: ze
+volgen de stadsrand en leverden lijnenruis over de hele stad op. Ze blijven kiesbaar via het
+zoekveld en via de rechtermuisknop, en krijgen geselecteerd een streepjeslijn — zodat je ze niet
+als gewone sectorgrens leest.
+
+Uitzetten kan onder *Kaartweergave*: `Overige parkeervlakken tonen` laat alleen je selectie
+staan, en `Geen achtergrond` geeft een witte kaart voor een schermafbeelding in een memo.
+
 ## Let op bij zones
 
 Een sector selecteren is **niet** hetzelfde als al zijn zones selecteren. Bij sector 58 is de
@@ -102,7 +124,7 @@ npm install jsdom && node test/test_app.mjs
 | `gen/*.js` | wat de site laadt (`window.GD_*`) |
 | `gen/*.json`, `gen/*.geojson` | dezelfde data los, voor hergebruik in QGIS of scripts |
 | `data/` | de bronshapefiles (RD New) |
-| `test/test_app.mjs` | regressietest, inclusief het gouden geval sector 75 |
+| `test/test_app.mjs` | regressietest (70 controles), inclusief het gouden geval sector 75 |
 
 De datalaag is samen ongeveer 1,9 MB, gzipped ±425 KB. `gen/atoms.js` — het hart van de
 berekening — is maar 44 KB: 1678 stukjes en 311 unieke sleutelsets.
