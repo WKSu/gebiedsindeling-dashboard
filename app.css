@@ -559,6 +559,8 @@ tr.below .bar i { background: var(--ink-3); }
 .cov-volledig { fill: var(--accent); fill-opacity: .62; }
 .cov-grotendeels { fill: url(#hatch-45); fill-opacity: 1; }
 .cov-gedeeltelijk { fill: url(#hatch-45-dense); fill-opacity: 1; }
+/* een snipper die je zelf hebt aangezet: wel vulling, maar de lichtste */
+.cov-marginaal { fill: url(#hatch-45-dense); fill-opacity: .6; }
 .cov-onderdrempel { fill: none; }
 .rev .cov-grotendeels { fill: url(#hatch-45-rev); }
 

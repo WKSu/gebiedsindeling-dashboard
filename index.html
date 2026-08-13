@@ -103,13 +103,13 @@
     </details>
 
     <details class="block" id="block-threshold" open>
-      <summary>Drempel <output id="thr-out">≥ 50 %</output></summary>
+      <summary>Drempel <output id="thr-out">≥ 20 %</output></summary>
       <input type="range" id="threshold" min="0" max="100" step="1" value="50"
              aria-label="Minimaal percentage van het gebied dat binnen de selectie ligt">
       <div class="presets">
         <button type="button" data-thr="0">alles</button>
-        <button type="button" data-thr="10">10 %</button>
-        <button type="button" data-thr="50" class="on">50 %</button>
+        <button type="button" data-thr="20" class="on">20 %</button>
+        <button type="button" data-thr="50">50 %</button>
         <button type="button" data-thr="95">95 %</button>
       </div>
       <p class="fine">Een gebied telt mee als minstens dit deel van zijn <em>eigen</em> oppervlakte
@@ -158,7 +158,7 @@
       </table>
     </div>
     <label class="check below-toggle" id="below-toggle" hidden>
-      <input type="checkbox" id="show-below"><span>Ook gebieden onder de drempel tonen</span>
+      <input type="checkbox" id="show-below" checked><span>Ook gebieden onder de drempel tonen</span>
     </label>
     <div class="empty" id="empty"></div>
   </aside>

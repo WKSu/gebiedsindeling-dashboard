@@ -11,7 +11,7 @@
   var CFG = {
     FULL_PCT: 99.5,
     MOSTLY_PCT: 50,
-    DEFAULT_THRESHOLD: 50,
+    DEFAULT_THRESHOLD: 20,
     EPS: 1e-9,
     MAX_SVG_FEATURES: 400,
     MAX_SUGGEST: 10,
@@ -99,7 +99,7 @@
     selection: { sectoren: new Set(), zones: new Set() },
     level: "sbd",
     threshold: CFG.DEFAULT_THRESHOLD,
-    showBelow: false,
+    showBelow: true,
     // Handmatige correcties op wat de drempel voorstelt, per niveau bijgehouden:
     // 'on' = alsnog meetellen, 'off' = juist niet meetellen. De drempel blijft dus
     // het voorstel, dit is jouw laatste woord erover.
@@ -962,12 +962,16 @@
     if (!row.counted) {
       return { pane: "gd-result", color: "#8A9099", weight: 1, opacity: 0.85, dashArray: "2 4", fill: false };
     }
+    // Wat meetelt, kleurt ook vanbinnen. De vulling volgt daarom de drempelloze
+    // dekkingsklasse: een handmatig aangezet gebied ligt per definitie onder de
+    // drempel, en "onderdrempel" heeft met opzet geen vulling.
+    var fillCls = row.band || row.cls;
     // Binnengrenzen tussen de gevonden vlakken blijven dun en halftransparant: de
     // buitengrens van de selectie moet de sterkste lijn op de kaart zijn.
     var base = {
       pane: "gd-result", color: "#0E5943", weight: 0.9, opacity: 0.6,
       fill: true, fillColor: "#1B7F5F",
-      dashArray: row.cls === "gedeeltelijk" ? "4 3" : null,
+      dashArray: fillCls === "gedeeltelijk" ? "4 3" : null,
     };
     // handmatig aangezet: stippellijn in het selectieblauw als herkenningspunt
     if (row.overridden) {
@@ -977,11 +981,11 @@
       base.dashArray = "1 3";
     }
     if (simplified) {
-      base.fillOpacity = row.cls === "volledig" ? 0.6 : row.cls === "grotendeels" ? 0.32 : 0.15;
+      base.fillOpacity = fillCls === "volledig" ? 0.6 : fillCls === "grotendeels" ? 0.32 : 0.15;
       base.className = "";
     } else {
       base.fillOpacity = 1;
-      base.className = "cov-" + row.cls;
+      base.className = "cov-" + fillCls;
     }
     return base;
   }
