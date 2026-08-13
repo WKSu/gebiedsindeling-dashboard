@@ -11,7 +11,7 @@
   var CFG = {
     FULL_PCT: 99.5,
     MOSTLY_PCT: 50,
-    DEFAULT_THRESHOLD: 10,
+    DEFAULT_THRESHOLD: 50,
     EPS: 1e-9,
     MAX_SVG_FEATURES: 400,
     MAX_SUGGEST: 10,
@@ -1490,7 +1490,7 @@
     el.empty.innerHTML =
       '<div class="empty-card"><h2>Van parkeersector naar TIR-gebiedsindeling</h2><ol>' +
       "<li>Typ een sectornummer \u2014 bijvoorbeeld <strong>75</strong> \u2014 of klik een sector op de kaart aan.</li>" +
-      "<li>Je krijgt de subbuurtdelen die voor \u2265\u202f10\u202f% binnen die sector liggen, met percentage en oppervlakte.</li>" +
+      "<li>Je krijgt de subbuurtdelen die voor \u2265\u202f50\u202f% binnen die sector liggen, met percentage en oppervlakte.</li>" +
       "<li>Kopieer de lijst en plak hem in Excel.</li></ol>" +
       '<div class="cta"><button type="button" id="demo">Probeer sector 75</button>' +
       '<button type="button" class="alt" id="demo-help">Wat is een subbuurtdeel?</button></div>' +
