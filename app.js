@@ -9,7 +9,9 @@
   /* ═══════════════════════════════════════════════════════ 1. CONFIG ══ */
 
   var CFG = {
-    FULL_PCT: 99.5,
+    // Vanaf hier telt een gebied als volledig gedekt: effen kleur, geen arcering.
+    // De marge onder 100 % vangt randsnippers op die praktisch niet meetellen.
+    FULL_PCT: 95,
     MOSTLY_PCT: 50,
     DEFAULT_THRESHOLD: 20,
     EPS: 1e-9,
@@ -1551,10 +1553,14 @@
     var rev = state.mode === "reverse";
     var c = rev ? "#5B3E9B" : "#1B7F5F";
     function row(sw, label) { return '<div class="row"><span class="sw" style="' + sw + '"></span>' + label + "</div>"; }
+    // De grenzen komen uit CFG, zodat de legenda niet uit de pas loopt met
+    // classify() zodra een van die drempels verschuift.
     el.legend.innerHTML = "<b>Dekking</b>" +
-      row("background:" + c + ";opacity:.62", "volledig") +
-      row("background:" + c + ";opacity:.34", "50\u201399 %") +
-      row("background:" + c + ";opacity:.16", state.threshold + "\u201350 %") +
+      row("background:" + c + ";opacity:.62", "volledig \u2265 " + CFG.FULL_PCT + " %") +
+      row("background:" + c + ";opacity:.34", CFG.MOSTLY_PCT + "\u2013" + CFG.FULL_PCT + " %") +
+      (state.threshold < CFG.MOSTLY_PCT
+        ? row("background:" + c + ";opacity:.16", state.threshold + "\u2013" + CFG.MOSTLY_PCT + " %")
+        : "") +
       row("border:1px dashed #8A9099;background:none", "onder de drempel") +
       "<b style='margin-top:5px'>Grenzen</b>" +
       row("height:0;border-top:3px solid " + (rev ? "#111827" : "#0F62FE") + ";box-shadow:0 0 0 1.5px #fff",
